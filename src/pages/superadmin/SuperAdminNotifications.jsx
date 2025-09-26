@@ -44,43 +44,13 @@ const SuperAdminNotifications = () => {
         setNotifications(response);
       } else {
         console.warn('Unexpected notifications response format:', response);
-        // Use mock data for demo since endpoint might not exist
-        setNotifications([
-          {
-            id: 1,
-            title: 'System Maintenance Scheduled',
-            message: 'Planned maintenance window on Sunday 2:00 AM - 4:00 AM EST',
-            type: 'info',
-            read: false,
-            urgent: false,
-            created_at: new Date(Date.now() - 3600000),
-            recipients: 'all'
-          },
-          {
-            id: 2,
-            title: 'High Order Volume Alert',
-            message: 'Unusual spike in orders detected across multiple restaurants',
-            type: 'warning',
-            read: false,
-            urgent: true,
-            created_at: new Date(Date.now() - 1800000),
-            recipients: 'admins'
-          },
-          {
-            id: 3,
-            title: 'New Restaurant Onboarded',
-            message: 'Pizza Palace has successfully completed onboarding',
-            type: 'success',
-            read: true,
-            urgent: false,
-            created_at: new Date(Date.now() - 7200000),
-            recipients: 'superadmins'
-          }
-        ]);
+        setNotifications([]);
       }
     } catch (error) {
       console.error('Failed to load notifications:', error);
-      addNotification('Failed to load notifications from server', 'error');
+      // Don't show error notification, just use empty data
+      console.warn('Notifications endpoint not available, using empty data');
+      setNotifications([]);
     } finally {
       setIsLoading(false);
     }

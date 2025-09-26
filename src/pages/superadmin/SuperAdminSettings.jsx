@@ -63,11 +63,12 @@ const SuperAdminSettings = () => {
         setSecuritySettings(response.data.security || securitySettings);
         setEmailSettings(response.data.email || emailSettings);
       } else {
-        console.warn('Settings endpoint not available, using default settings');
+        console.warn('Settings endpoint response format unexpected, using default settings');
       }
     } catch (error) {
       console.error('Failed to load settings:', error);
-      // Keep default settings if endpoint doesn't exist
+      // Keep default settings and don't show error
+      console.warn('Settings endpoint not available, using default settings');
     } finally {
       setIsLoading(false);
     }

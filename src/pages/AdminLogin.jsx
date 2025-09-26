@@ -55,6 +55,13 @@ const AdminLogin = () => {
           navigate(from.pathname || '/admin', { replace: true });
         }
       }
+    } else {
+      // Handle specific error codes
+      if (response.code === 'SUBSCRIPTION_EXPIRED') {
+        addNotification('Restaurant subscription has expired. Please contact support to reactivate your account.', 'error');
+      } else {
+        addNotification('Invalid admin credentials. Please check your Admin ID and password.', 'error');
+      }
     })
     .catch(error => {
       if (error.message && (error.message.includes('fetch') || error.message.includes('Network'))) {

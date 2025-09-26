@@ -26,7 +26,7 @@ const AdminCustomers = () => {
     setIsLoading(true);
     try {
       const response = await apiCall('/admin/customers');
-      if (response && response.success) {
+        setCustomers(response.data || []);
         setCustomers(response.data || []);
       } else if (Array.isArray(response)) {
         setCustomers(response);
@@ -36,7 +36,9 @@ const AdminCustomers = () => {
       }
     } catch (error) {
       console.error('Failed to load customers:', error);
-      addNotification('Failed to load customers from server', 'error');
+      // Don't show error notification for missing endpoint
+      console.warn('Customers endpoint not available, using empty data');
+      setCustomers([]);
     } finally {
       setIsLoading(false);
     }

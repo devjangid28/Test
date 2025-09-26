@@ -496,6 +496,15 @@ router.post('/login', loginValidation, handleValidationErrors, async (req, res) 
             // Verify admin password
             const isValidPassword = await bcrypt.compare(password, restaurant.admin_password_hash);
             if (isValidPassword) {
+                // Check if restaurant is active
+                if (!restaurant.is_active) {
+                    return res.status(403).json({
+                        success: false,
+                        message: 'Restaurant subscription has expired. Please contact support to reactivate your account.',
+                        code: 'SUBSCRIPTION_EXPIRED'
+                    });
+                }
+
                 // Get admin user details
                 const adminUser = await db.get(
                     'SELECT * FROM users WHERE admin_id = ? AND role = "admin" AND is_active = 1',

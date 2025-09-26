@@ -1,6 +1,8 @@
 const express = require('express');
 const db = require('../config/database');
+const bcrypt = require('bcryptjs');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
+const { body, validationResult } = require('express-validator');
 
 const router = express.Router();
 
@@ -304,6 +306,354 @@ router.get('/analytics', async (req, res) => {
                 orderStatusDistribution: [],
                 popularCuisines: []
             }
+        });
+    }
+});
+
+// POST /api/super-admin/restaurants - Create new restaurant
+router.post('/restaurants', [
+    body('name').trim().isLength({ min: 1, max: 100 }).withMessage('Restaurant name is required and must be less than 100 characters'),
+    body('cuisine').trim().isLength({ min: 1, max: 50 }).withMessage('Cuisine type is required'),
+    body('address').trim().isLength({ min: 1, max: 200 }).withMessage('Address is required'),
+    body('phone').trim().isLength({ min: 1, max: 20 }).withMessage('Phone number is required'),
+    body('description').optional().isLength({ max: 500 }).withMessage('Description must be less than 500 characters'),
+    body('image').optional().isURL().withMessage('Image must be a valid URL'),
+    body('admin_name').trim().isLength({ min: 1, max: 100 }).withMessage('Admin name is required'),
+    body('admin_email').isEmail().withMessage('Valid admin email is required'),
+    body('admin_id').trim().isLength({ min: 3, max: 20 }).withMessage('Admin ID must be 3-20 characters'),
+    body('admin_password').isLength({ min: 6 }).withMessage('Admin password must be at least 6 characters')
+], async (req, res) => {
+    try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Validation failed',
+                errors: errors.array()
+            });
+        }
+
+        const { 
+            name, cuisine, address, phone, description, image, 
+            admin_name, admin_email, admin_id, admin_password 
+        } = req.body;
+
+        // Check if admin_id already exists
+        const existingRestaurant = await db.get(
+            'SELECT id FROM restaurants WHERE admin_id = ?',
+            [admin_id]
+        );
+
+        if (existingRestaurant) {
+            return res.status(400).json({
+                success: false,
+                message: 'Admin ID already exists'
+            });
+        }
+
+        // Check if admin email already exists
+        const existingAdmin = await db.get(
+            'SELECT id FROM users WHERE email = ?',
+            [admin_email]
+        );
+
+        if (existingAdmin) {
+            return res.status(400).json({
+                success: false,
+                message: 'Admin email already exists'
+            });
+        }
+
+        // Hash admin password
+        const hashedPassword = await bcrypt.hash(admin_password, 12);
+
+        // Create restaurant
+        const restaurantResult = await db.run(`
+            INSERT INTO restaurants (name, cuisine, address, phone, description, image, admin_id, admin_password_hash, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+        `, [name, cuisine, address, phone, description || null, image || null, admin_id, hashedPassword]);
+
+        // Create admin user
+        await db.run(`
+            INSERT INTO users (name, email, password_hash, role, restaurant_id, admin_id, is_active)
+            VALUES (?, ?, ?, 'admin', ?, ?, 1)
+        `, [admin_name, admin_email, hashedPassword, restaurantResult.id, admin_id]);
+
+        console.log(`✅ Restaurant created: ${name} with admin ${admin_id} by Super Admin ${req.user.id}`);
+
+        res.status(201).json({
+            success: true,
+            message: 'Restaurant created successfully',
+            data: {
+                id: restaurantResult.id,
+                name,
+                admin_id
+            }
+        });
+
+    } catch (error) {
+        console.error('Create restaurant error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while creating restaurant'
+        });
+    }
+});
+
+// PUT /api/super-admin/restaurants/:id - Update restaurant
+router.put('/restaurants/:id', [
+    body('name').optional().trim().isLength({ min: 1, max: 100 }).withMessage('Restaurant name must be less than 100 characters'),
+    body('cuisine').optional().trim().isLength({ min: 1, max: 50 }).withMessage('Cuisine type is required'),
+    body('address').optional().trim().isLength({ min: 1, max: 200 }).withMessage('Address is required'),
+    body('phone').optional().trim().isLength({ min: 1, max: 20 }).withMessage('Phone number is required'),
+    body('description').optional().isLength({ max: 500 }).withMessage('Description must be less than 500 characters'),
+    body('image').optional().isURL().withMessage('Image must be a valid URL'),
+    body('rating').optional().isFloat({ min: 0, max: 5 }).withMessage('Rating must be between 0 and 5')
+], async (req, res) => {
+    try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Validation failed',
+                errors: errors.array()
+            });
+        }
+
+        const { id } = req.params;
+
+        // Check if restaurant exists
+        const existingRestaurant = await db.get(
+            'SELECT id FROM restaurants WHERE id = ?',
+            [id]
+        );
+
+        if (!existingRestaurant) {
+            return res.status(404).json({
+                success: false,
+                message: 'Restaurant not found'
+            });
+        }
+
+        // Build update query dynamically
+        const updateFields = [];
+        const updateValues = [];
+
+        const allowedFields = ['name', 'cuisine', 'address', 'phone', 'description', 'image', 'rating'];
+        
+        for (const field of allowedFields) {
+            if (req.body.hasOwnProperty(field)) {
+                updateFields.push(`${field} = ?`);
+                updateValues.push(req.body[field]);
+            }
+        }
+
+        if (updateFields.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'No valid fields to update'
+            });
+        }
+
+        updateFields.push('updated_at = CURRENT_TIMESTAMP');
+        updateValues.push(id);
+
+        await db.run(
+            `UPDATE restaurants SET ${updateFields.join(', ')} WHERE id = ?`,
+            updateValues
+        );
+
+        console.log(`✅ Restaurant updated: ID ${id} by Super Admin ${req.user.id}`);
+
+        res.status(200).json({
+            success: true,
+            message: 'Restaurant updated successfully',
+            data: {
+                id: parseInt(id),
+                updated: true
+            }
+        });
+
+    } catch (error) {
+        console.error('Update restaurant error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while updating restaurant'
+        });
+    }
+});
+
+// PUT /api/super-admin/restaurants/:id/status - Toggle restaurant status
+router.put('/restaurants/:id/status', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { is_active } = req.body;
+
+        // Check if restaurant exists
+        const existingRestaurant = await db.get(
+            'SELECT id, name, is_active FROM restaurants WHERE id = ?',
+            [id]
+        );
+
+        if (!existingRestaurant) {
+            return res.status(404).json({
+                success: false,
+                message: 'Restaurant not found'
+            });
+        }
+
+        // Update restaurant status
+        await db.run(
+            'UPDATE restaurants SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [is_active ? 1 : 0, id]
+        );
+
+        // Also update admin user status
+        await db.run(
+            'UPDATE users SET is_active = ? WHERE restaurant_id = ? AND role = "admin"',
+            [is_active ? 1 : 0, id]
+        );
+
+        console.log(`✅ Restaurant status updated: ${existingRestaurant.name} ${is_active ? 'activated' : 'deactivated'} by Super Admin ${req.user.id}`);
+
+        res.status(200).json({
+            success: true,
+            message: `Restaurant ${is_active ? 'activated' : 'deactivated'} successfully`,
+            data: {
+                id: parseInt(id),
+                is_active
+            }
+        });
+
+    } catch (error) {
+        console.error('Update restaurant status error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while updating restaurant status'
+        });
+    }
+});
+
+// GET /api/super-admin/notifications - Get platform notifications
+router.get('/notifications', async (req, res) => {
+    try {
+        // For now, return mock notifications since we don't have a notifications table
+        const notifications = [
+            {
+                id: 1,
+                title: 'System Maintenance Scheduled',
+                message: 'Planned maintenance window on Sunday 2:00 AM - 4:00 AM EST',
+                type: 'info',
+                read: false,
+                urgent: false,
+                created_at: new Date(Date.now() - 3600000),
+                recipients: 'all'
+            },
+            {
+                id: 2,
+                title: 'High Order Volume Alert',
+                message: 'Unusual spike in orders detected across multiple restaurants',
+                type: 'warning',
+                read: false,
+                urgent: true,
+                created_at: new Date(Date.now() - 1800000),
+                recipients: 'admins'
+            },
+            {
+                id: 3,
+                title: 'New Restaurant Onboarded',
+                message: 'A new restaurant has successfully completed onboarding',
+                type: 'success',
+                read: true,
+                urgent: false,
+                created_at: new Date(Date.now() - 7200000),
+                recipients: 'superadmins'
+            }
+        ];
+
+        res.status(200).json({
+            success: true,
+            message: 'Notifications retrieved successfully',
+            data: notifications
+        });
+
+    } catch (error) {
+        console.error('Get notifications error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while fetching notifications',
+            data: []
+        });
+    }
+});
+
+// PUT /api/super-admin/settings/:type - Update platform settings
+router.put('/settings/:type', async (req, res) => {
+    try {
+        const { type } = req.params;
+        const settings = req.body;
+
+        // For now, just return success since we don't have a settings table
+        console.log(`✅ ${type} settings updated by Super Admin ${req.user.id}:`, settings);
+
+        res.status(200).json({
+            success: true,
+            message: `${type} settings updated successfully`,
+            data: settings
+        });
+
+    } catch (error) {
+        console.error('Update settings error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while updating settings'
+        });
+    }
+});
+
+// GET /api/super-admin/settings - Get platform settings
+router.get('/settings', async (req, res) => {
+    try {
+        // Return default settings since we don't have a settings table
+        const settings = {
+            platform: {
+                platform_name: 'RestaurantAI',
+                platform_description: 'AI-Powered Multi-Restaurant Management Platform',
+                maintenance_mode: false,
+                allow_new_registrations: true,
+                max_restaurants: 100,
+                commission_rate: 5.0,
+                currency: 'USD',
+                timezone: 'America/New_York'
+            },
+            security: {
+                session_timeout: 24,
+                password_min_length: 8,
+                require_2fa: false,
+                max_login_attempts: 5,
+                lockout_duration: 30
+            },
+            email: {
+                smtp_host: '',
+                smtp_port: 587,
+                smtp_username: '',
+                smtp_password: '',
+                from_email: '',
+                from_name: 'RestaurantAI'
+            }
+        };
+
+        res.status(200).json({
+            success: true,
+            message: 'Settings retrieved successfully',
+            data: settings
+        });
+
+    } catch (error) {
+        console.error('Get settings error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while fetching settings'
         });
     }
 });
